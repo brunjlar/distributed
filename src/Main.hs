@@ -19,8 +19,8 @@ data GalaxyMessage = LookForGalaxy ProcessId | GalaxyFound String
 
 instance Binary GalaxyMessage
 
-traveller :: Process ()
-traveller = do
+traveller :: () -> Process ()
+traveller () = do
     say "here's a traveller!"
     LookForGalaxy pid <- expect
     say $ "received message from " ++ show pid
@@ -29,31 +29,34 @@ traveller = do
 
 remotable ['traveller]
 
+myRemoteTable :: RemoteTable
+myRemoteTable = Main.__remoteTable initRemoteTable
+
 master :: Backend -> [NodeId] -> Process ()
 master backend nodes = do
-    say $ "here's the master!"
+    say "here's the master!"
     myPid <- getSelfPid
     forM_ nodes $ \node -> do
-        nodePid <- spawn node $(mkStaticClosure 'traveller)
+        nodePid <- spawn node ($(mkClosure 'traveller) ())
         say $ "slave " ++ show node ++ " spawned"
         send nodePid $ LookForGalaxy myPid
         say $ "master sent message to " ++ show nodePid
         GalaxyFound n <- expect
         say $ "found galaxy '" ++ n ++ "'"
         terminateAllSlaves backend
-        say $ "slaves terminated"
+        say "slaves terminated"
 
 main :: IO ()
 main = do
     args <- getArgs
     case args of
       ["master", host, port] -> do
-          backend <- initializeBackend host port initRemoteTable
+          backend <- initializeBackend host port myRemoteTable
           putStrLn "backend initialized"
           startMaster backend (master backend)
           putStrLn "master started"
       ["slave", host, port]  -> do
-          backend <- initializeBackend host port initRemoteTable
+          backend <- initializeBackend host port myRemoteTable
           putStrLn "backend initialized"
           startSlave backend
           putStrLn "slave started"
