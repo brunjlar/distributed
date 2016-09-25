@@ -14,37 +14,60 @@ import Data.Typeable                                      (Typeable)
 import GHC.Generics                                       (Generic)
 import System.Environment
 
-data GalaxyMessage = LookForGalaxy ProcessId | GalaxyFound String
-    deriving (Show, Typeable, Generic)
+data MyMessage = Hello NodeId NodeId deriving (Show, Typeable, Generic)
 
-instance Binary GalaxyMessage
+instance Binary MyMessage
 
-traveller :: () -> Process ()
-traveller () = do
-    say "here's a traveller!"
-    LookForGalaxy pid <- expect
-    say $ "received message from " ++ show pid
-    send pid $ GalaxyFound "Andromeda"
-    say "traveller sent message"
+slave :: (ProcessId, [NodeId]) -> Process ()
+slave (master, nodes) = do
+    myPid  <- getSelfPid
+    myNode <- getSelfNode
+    register "receiver" myPid
+    receivers <- mapM getReceiver nodes
+    forM_ receivers $ \(node, pid) -> send pid $ Hello myNode node
+    wait $ length nodes
+    send master myNode
 
-remotable ['traveller]
+  where
+
+    getReceiver :: NodeId -> Process (NodeId, ProcessId)
+    getReceiver node = do
+        whereisRemoteAsync node "receiver"
+        WhereIsReply _ mPid <- expect
+        case mPid of
+          Nothing  -> getReceiver node
+          Just pid -> return (node, pid)
+
+    wait :: Int -> Process ()
+    wait 0 = return ()
+    wait n = do
+        m <- expect :: Process MyMessage
+        say $ show m
+        wait $ pred n
+
+remotable ['slave]
 
 myRemoteTable :: RemoteTable
 myRemoteTable = Main.__remoteTable initRemoteTable
 
 master :: Backend -> [NodeId] -> Process ()
 master backend nodes = do
-    say "here's the master!"
+    let n = length nodes
+    say $ "master started with " ++ show n ++ " slave node(s)"
     myPid <- getSelfPid
-    forM_ nodes $ \node -> do
-        nodePid <- spawn node ($(mkClosure 'traveller) ())
-        say $ "slave " ++ show node ++ " spawned"
-        send nodePid $ LookForGalaxy myPid
-        say $ "master sent message to " ++ show nodePid
-        GalaxyFound n <- expect
-        say $ "found galaxy '" ++ n ++ "'"
-        terminateAllSlaves backend
-        say "slaves terminated"
+    forM_ nodes $ \node -> spawn node ($(mkClosure 'slave) (myPid, nodes))
+    wait n
+    say $ show n ++ " node(s) done"
+    terminateAllSlaves backend
+
+  where
+
+    wait :: Int -> Process ()
+    wait 0 = return ()
+    wait n = do
+        node <- expect :: Process NodeId
+        say $ "done: " ++ show node
+        wait $ pred n
 
 main :: IO ()
 main = do
@@ -52,12 +75,8 @@ main = do
     case args of
       ["master", host, port] -> do
           backend <- initializeBackend host port myRemoteTable
-          putStrLn "backend initialized"
           startMaster backend (master backend)
-          putStrLn "master started"
       ["slave", host, port]  -> do
           backend <- initializeBackend host port myRemoteTable
-          putStrLn "backend initialized"
           startSlave backend
-          putStrLn "slave started"
       _                      -> putStrLn "unknown parameters"
