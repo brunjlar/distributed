@@ -12,14 +12,27 @@ category:            Cloud
 build-type:          Simple
 cabal-version:       >=1.10
 
-executable distributed
+library
   hs-source-dirs:      src
-  main-is:             Main.hs
-  default-language:    Haskell2010
+  exposed-modules:     Distributed
+  other-modules:       Distributed.Broadcast
+                     , Distributed.Channel
+                     , Distributed.Utils
+  ghc-options:         -Wall -threaded -O
   build-depends:       base >= 4.7 && < 5
                      , binary >= 0.6.3.0
                      , containers
                      , distributed-process
+                     , time
+  default-language:    Haskell2010
+
+executable distributed
+  hs-source-dirs:      distributed
+  main-is:             Main.hs
+  default-language:    Haskell2010
+  build-depends:       base >= 4.7 && < 5
+                     , containers
+                     , distributed
+                     , distributed-process
                      , distributed-process-simplelocalnet
-                     , random
   ghc-options:         -Wall -threaded -O

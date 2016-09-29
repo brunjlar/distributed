@@ -1,0 +1,24 @@
+Hi, Nikos told me I could pose my questions about the "technical test" to you, so here we go:
+
+1.) What kind of "program" am I supposed to write? One program that will then be (manually) started on each node? Or one program that will then automatically start some code on all the nodes? Most examples I read about "Cloud Haskell" seem to be of the fist kind, where the user starts the same program on all the nodes (of course (s)he could also use a script for that)... but the specification doesn't make this clear.
+
+2.) Will all the nodes run the same program? Or will there be one "master" node and several "slaves"?
+
+3.) When it says that "each node prints a result", WHERE do the nodes print their results? Each node to its own stdout? Or do all nodes send the result to one special node, which then prints all of them to its own stdout?
+
+4.) It says "the larger the score, the better", but surely there are other criteria to optimize for? Shouldn't all the nodes print the SAME answer? Which do you prefer: ONE node with a very high throughput/score? Or ALL nodes agreeing on a somewhat lower score? In the case of severe network failure, the latter might be impossible to achieve... so is it more important to try to ensure that each message reaches each node, even in the face of network problems?
+Or can some "lost" nodes be ignored in order to make the others score higher? What about the message ordering? Is a higher score more important than a perfectly correct ordering? 
+
+5.) I believe that hypothetical function tau used to defined message ordering is theoretically impossible, as we know from Lamport's landmark paper on "Time, Clocks, and the Ordering of Events in a Distributed System". So am I supposed to take the naive approach and assume that the nodes' system clocks are accurate? Or should I use something along the lines of Lamport's logical clocks, which would allow me to totally order all messages, but which would not neccessarily agree with
+physical time?
+
+6.) The random messages are supposed to be deterministic, using a seed. Is this one seed for the whole program, which means that all the nodes send the identical sequence of pseudo-random numbers? Or will each node get its own seed?
+
+7.) Which transport library am I supposed to use? TCP? Simple Local Network? Can I assume that the demanded "list of nodes in the testing cluster" is given by host name and port number? This is also related to my first question above.
+
+8.) And finally: What kind of program/project do you expect? Is this mostly about demonstrating the ability to get Cloud Haskell up and running and to use some of its communication mechanisms and other idioms? A short, simple program, written in a couple of hours? - Or am I supposed to come up with sophisticated synchronization and error-recovery protocols and spend days or even weeks on this?
+
+Thanks a lot for your help! I'm looking forward to your answers.
+
+Greetings -
+Lars

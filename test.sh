@@ -18,4 +18,4 @@ echo slaves started
 echo
 sleep 1
 
-distributed master localhost 8091 123456 1 20
+distributed master localhost 8080
