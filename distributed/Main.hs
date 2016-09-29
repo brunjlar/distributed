@@ -7,19 +7,18 @@ import qualified Control.Distributed.Process.Backend.SimpleLocalnet as S
 import           Control.Distributed.Process.Closure
 import           Control.Distributed.Process.Node                   (initRemoteTable)
 import           Control.Monad
-import qualified Data.Map.Strict                                    as M
 import           Distributed
 import           System.Environment
 
 agent :: [NodeId] -> Process ()
-agent nodes = withChannels nodes $ \m -> do
+agent nodes = withBroadcast nodes $ \s r -> do
     myNode <- getSelfNode
-    forM_ (M.toAscList m) $ \(node, channel) -> do
-        let message = show myNode ++ " -> " ++ show node
-        say $ "sending '" ++ message ++ "'"
-        sendChan (sendPort channel) message
-        message' <- receiveChan (receivePort channel)
-        say $ "received '" ++ message' ++ "'"
+    let msg = "broadcast from " ++ show myNode
+    sendChan s msg
+    say $ "broadcasted '" ++ msg ++ "'"
+    forever $ do
+        (n, x) <- receiveChan r
+        say $ "received broadcast from node " ++ show n ++ ": " ++ x
 
 remotable ['agent]
 
