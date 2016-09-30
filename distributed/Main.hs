@@ -4,7 +4,6 @@
 module Main where
 
 import           Control.Concurrent                                 (threadDelay)
-import           Control.Concurrent.MVar
 import qualified Control.Distributed.Process.Backend.SimpleLocalnet as S
 import           Control.Distributed.Process.Closure
 import           Control.Distributed.Process.Node                   (initRemoteTable)
@@ -16,19 +15,18 @@ import           System.Random
 import           Text.Printf                                        (printf)
 
 agent :: ([NodeId], Int, Int) -> Process ()
-agent (nodes, sf, sd) = withBroadcast nodes $ \s r -> do
+agent (nodes, sf, sd) = withBroadcast nodes (Just 1000) $ \s r -> do
     say $ printf "agent started with seed %d" sd
     now <- liftIO getCurrentTime
     let sendUntil = addUTCTime (fromIntegral sf) now
         l         = length nodes
-    cnt <- liftIO $ newMVar 0
-    _ <- spawnLocal $ send' s l cnt sendUntil
-    receive' r l cnt 0 0 0
+    _ <- spawnLocal $ send' s sendUntil
+    receive' r l 0 0 0
 
   where
 
-    send' :: SendPort (Maybe Double) -> Int -> MVar Int -> UTCTime -> Process ()
-    send' s l cnt sendUntil = go (mkStdGen sd)
+    send' :: ((Maybe Double) -> Process ()) -> UTCTime -> Process ()
+    send' s sendUntil = go (mkStdGen sd)
 
       where
 
@@ -36,35 +34,28 @@ agent (nodes, sf, sd) = withBroadcast nodes $ \s r -> do
         go g = do
             now <- liftIO getCurrentTime
             if now >= sendUntil
-               then sendChan s Nothing
+               then s Nothing >> say "stopped sending"
                else do
-                   c <- liftIO $ takeMVar cnt
-                   if c <= 0
-                      then do
-                          let (x, g') = randomR (0, 1) g
-                          sendChan s $ Just x
-                          liftIO $ putMVar cnt l
-                          go g'
-                      else liftIO (putMVar cnt c) >> go g
+                  let (x, g') = randomR (0, 1) g
+                  s $ Just x
+                  go g'
 
     receive' ::    ReceivePort (NodeId, Maybe Double)
                 -> Int
-                -> MVar Int
                 -> Int
                 -> Int
                 -> Double
                 -> Process ()
-    receive' r !l !cnt !nothings !justs !sm
-        | nothings == l = say $ show (justs, sm)
+    receive' r !l !nothings !justs !sm
+        | nothings == l = let msg = show (justs, sm) in say msg >> liftIO (putStrLn msg)
         | otherwise     = do
             mx <- receiveChan r
             case mx of
-                (_, Nothing) -> receive' r l cnt (succ nothings) justs sm
+                (_, Nothing) -> receive' r l (succ nothings) justs sm
                 (_, Just x)  -> do
-                    liftIO $ modifyMVar cnt (\c -> return (pred c, ()))
                     let justs' = succ justs
                         sm'    = sm + fromIntegral justs' * x
-                    receive' r l cnt nothings justs' sm'
+                    receive' r l nothings justs' sm'
 
 remotable ['agent]
 
@@ -76,7 +67,8 @@ master backend sf wf s nodes = do
     say "master started"
     forM_ (zip nodes [s..]) $
         \(node, s') -> spawn node ($(mkClosure 'agent) (nodes, sf, s'))
-    say $ printf "agents started, sending for %d second(s)" sf
+    say $ "agents started"
+    say $ printf "sending for %d second(s)" sf
     liftIO $ threadDelay $ 1000000 * sf
     say $ printf "waiting for %d second(s)" wf
     liftIO $ threadDelay $ 1000000 * wf

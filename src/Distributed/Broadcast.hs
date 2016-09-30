@@ -7,6 +7,7 @@ module Distributed.Broadcast
     ) where
 
 import           Control.Concurrent.MVar     (MVar, newMVar, takeMVar, putMVar)
+import           Control.Concurrent.QSem     (QSem, newQSem, waitQSem, signalQSem)
 import           Control.Distributed.Process
 import           Control.Monad
 import           Data.Binary                 (Binary)
@@ -39,18 +40,23 @@ instance Binary a => Binary (Msg a)
 
 withBroadcast ::    forall a b. (Typeable a, Binary a)
                  => [NodeId]
-                 -> (SendPort a -> ReceivePort (NodeId, a) -> Process b)
+                 -> Maybe Int
+                 -> ((a -> Process ()) -> ReceivePort (NodeId, a) -> Process b)
                  -> Process b
-withBroadcast nodes f = withChannels nodes $ \m -> do
+withBroadcast nodes throttle f = withChannels nodes $ \m -> do
     let clocks  = M.fromList [(node, 0 :: Integer) | node <- nodes]
         pending = H.empty
     state       <- liftIO $ newMVar (clocks, pending)
+    msem        <- maybe
+                    (return Nothing)
+                    (\t -> liftIO (newQSem $ max t 1) >>= return . Just)
+                    throttle
     (sb, rb)    <- newChan
     (sd, rd)    <- newChan
     receivers   <- forM (M.toAscList m) $ \(n, _) -> spawnLocal $ receive state m n
     broadcaster <- spawnLocal $ broadcast state m rb
-    deliverer   <- spawnLocal $ deliver state sd
-    x           <- f sb rd
+    deliverer   <- spawnLocal $ deliver state msem sd
+    x           <- f (broadcast' msem sb) rd
     kill deliverer "killing deliverer"
     kill broadcaster "killing broadcaster"
     forM_ receivers $ \receiver -> kill receiver "killing receiver"
@@ -72,8 +78,8 @@ withBroadcast nodes f = withChannels nodes $ \m -> do
         forM_ (M.toAscList m) $ \(_, ch) -> sendChan (sendPort ch) msg
         liftIO $ putMVar state (clocks', pending')
 
-    deliver :: MVar (State a) -> SendPort (NodeId, a) -> Process ()
-    deliver state s = forever $ do
+    deliver :: MVar (State a) -> Maybe QSem -> SendPort (NodeId, a) -> Process ()
+    deliver state msem s = forever $ do
         (clocks, pending) <- liftIO $ takeMVar state
         case H.viewHead pending of
             Nothing      -> liftIO (putMVar state (clocks, pending))
@@ -85,6 +91,11 @@ withBroadcast nodes f = withChannels nodes $ \m -> do
                        sendChan s (node, x)
                        let Just pending' = H.viewTail pending
                        liftIO $ putMVar state (clocks, pending')
+                       case msem of
+                           Nothing  -> return ()
+                           Just sem -> do
+                               myNode <- getSelfNode
+                               when (myNode == node) $ liftIO $ signalQSem sem
                    else liftIO (putMVar state (clocks, pending))
 
     receive :: MVar (State a) -> Map NodeId (Channel (Msg a)) -> NodeId -> Process ()
@@ -110,3 +121,7 @@ withBroadcast nodes f = withChannels nodes $ \m -> do
                        forM_ (M.toAscList m) $ \(_, ch) -> sendChan (sendPort ch) msg'
                        liftIO $ putMVar state (clocks'', pending')
                    else liftIO $ putMVar state (clocks', pending')
+
+    broadcast' :: Maybe QSem -> SendPort a -> a -> Process ()
+    broadcast' Nothing    s x = sendChan s x
+    broadcast' (Just sem) s x = liftIO (waitQSem sem) >> sendChan s x
