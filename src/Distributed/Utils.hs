@@ -4,6 +4,8 @@ module Distributed.Utils
 
 import Control.Distributed.Process
 
+-- simple utility "layer", so that a process can assume that a port with a given name has been registered
+
 withRegistry :: String -> Process a -> Process a
 withRegistry s p = do
     myPid <- getSelfPid

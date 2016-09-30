@@ -1,3 +1,8 @@
+-- My interpretation/implementation of the "broadcast with total message ordering abstraction",
+-- taken from the book "Distributed Algorithms for Message Passing Systems" by Michel Raynal.
+-- The idea is to provide - in a modular way - the capability to layer "broadcast" on top of a
+-- (totally connected) network of Cloud Haskell nodes.
+
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE BangPatterns #-}
 {-# LANGUAGE DeriveGeneric #-}
@@ -38,12 +43,22 @@ data Msg a =
 
 instance Binary a => Binary (Msg a)
 
+-- withBroadcast provides the broadcast abstraction.
+-- It takes the list of all nodes and
+-- an optional throttle to cap the number of broadcasted messages waiting for delivery
+-- and then transforms a process with broadcast capability
+-- (represented by a function to send messages of type a and a channel to receive broadcasts
+-- of type (NodeId, a))
+-- into a "normal" process.
+
 withBroadcast ::    forall a b. (Typeable a, Binary a)
                  => [NodeId]
                  -> Maybe Int
                  -> ((a -> Process ()) -> ReceivePort (NodeId, a) -> Process b)
                  -> Process b
 withBroadcast nodes throttle f = withChannels nodes $ \m -> do
+
+    -- set up the broadcasting infrastructure
     let clocks  = M.fromList [(node, 0 :: Integer) | node <- nodes]
         pending = H.empty
     state       <- liftIO $ newMVar (clocks, pending)
@@ -56,10 +71,16 @@ withBroadcast nodes throttle f = withChannels nodes $ \m -> do
     receivers   <- forM (M.toAscList m) $ \(n, _) -> spawnLocal $ receive state m n
     broadcaster <- spawnLocal $ broadcast state m rb
     deliverer   <- spawnLocal $ deliver state msem sd
-    x           <- f (broadcast' msem sb) rd
+
+    -- run the "enhanced" process, using the broadcasting infrastructure
+    x <- f (broadcast' msem sb) rd
+
+    -- clean up
     kill deliverer "killing deliverer"
     kill broadcaster "killing broadcaster"
     forM_ receivers $ \receiver -> kill receiver "killing receiver"
+
+    -- return the result
     return x
 
   where

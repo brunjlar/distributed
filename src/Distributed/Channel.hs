@@ -23,15 +23,24 @@ sendPort (Channel (s, _)) = s
 receivePort :: Channel a -> ReceivePort a
 receivePort (Channel (_, r)) = r
 
+-- withChannels layers a "bidirectional typed channel" abstraction on top of a fully connected
+-- network of Cloud Haskell nodes.
+-- It transforms a process that can use a map from nodes to bidirectional typed channels
+-- into a "normal" process.
+
 withChannels ::    forall a b. (Typeable a, Binary a)
                 => [NodeId]
                 -> (Map NodeId (Channel a) -> Process b)
                 -> Process b
 withChannels nodes f = withRegistry "port" $ do
+
+    -- set up the bidirectional channels
     myNode <- getSelfNode
     let nodes' = filter (/= myNode) nodes
     cs <- forM nodes' getChannel
     let m = M.fromList $ zip nodes' cs
+
+    -- run the "enhanced" process
     f m
 
   where

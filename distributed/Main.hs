@@ -14,13 +14,21 @@ import           Options
 import           System.Random
 import           Text.Printf                                        (printf)
 
+-- Agent code, supposed to run on all "slave" nodes.
+-- It takes a list of all (slave) nodes, the time to send and the random seed as arguments.
+
 agent :: ([NodeId], Int, Int) -> Process ()
 agent (nodes, sf, sd) = withBroadcast nodes (Just 1000) $ \s r -> do
+
     say $ printf "agent started with seed %d" sd
     now <- liftIO getCurrentTime
     let sendUntil = addUTCTime (fromIntegral sf) now
         l         = length nodes
+
+    -- spawn a thread to permanently broadcast random messages until the sending time is up
     _ <- spawnLocal $ send' s sendUntil
+
+    -- keep receiving messages and accumulating the result until all random broadcasts have been received
     receive' r l 0 0 0
 
   where
@@ -34,7 +42,7 @@ agent (nodes, sf, sd) = withBroadcast nodes (Just 1000) $ \s r -> do
         go g = do
             now <- liftIO getCurrentTime
             if now >= sendUntil
-               then s Nothing >> say "stopped sending"
+               then s Nothing >> say "stopped sending" -- sending time is up, indicate termination
                else do
                   let (x, g') = randomR (0, 1) g
                   s $ Just x
@@ -47,20 +55,23 @@ agent (nodes, sf, sd) = withBroadcast nodes (Just 1000) $ \s r -> do
                 -> Double
                 -> Process ()
     receive' r !l !nothings !justs !sm
-        | nothings == l = let msg = show (justs, sm) in say msg >> liftIO (putStrLn msg)
+        | nothings == l = let msg = show (justs, sm) in say msg >> liftIO (putStrLn msg) -- report result
         | otherwise     = do
             mx <- receiveChan r
             case mx of
                 (_, Nothing) -> receive' r l (succ nothings) justs sm
                 (_, Just x)  -> do
                     let justs' = succ justs
-                        sm'    = sm + fromIntegral justs' * x
+                        sm'    = sm + fromIntegral justs' * x -- accumulate result
                     receive' r l nothings justs' sm'
 
 remotable ['agent]
 
 myRemoteTable :: RemoteTable
 myRemoteTable = Main.__remoteTable initRemoteTable
+
+-- "Master" code, which spawns the "agent" code to all slave nodes and terminates all agents
+-- when the time is up.
 
 master :: S.Backend -> Int -> Int -> Int -> [NodeId] -> Process ()
 master backend sf wf s nodes = do
